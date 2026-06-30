@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using System.Collections.Generic;
 
 public class PuzzleDragController : MonoBehaviour
@@ -49,22 +50,45 @@ public class PuzzleDragController : MonoBehaviour
 
     private void HandleInput()
     {
-        if (isTweening) return; // Khối đang tự hút vào lưới thì khóa điều khiển tạm thời
+        Vector2 pointerPos = Vector2.zero;
+        bool pressed = false;
+        bool held = false;
+        bool released = false;
 
-        // 1. Nhấn chuột / Chạm màn hình (Touch Start)
-        if (Input.GetMouseButtonDown(0))
+        if (Touchscreen.current != null)
         {
-            BeginDrag(Input.mousePosition);
+            var touch = Touchscreen.current.primaryTouch;
+
+            pressed = touch.press.wasPressedThisFrame;
+            held = touch.press.isPressed;
+            released = touch.press.wasReleasedThisFrame;
+
+            if (pressed || held || released)
+            {
+                pointerPos = touch.position.ReadValue();
+            }
         }
-        // 2. Đang giữ và kéo (Touch Move)
-        else if (Input.GetMouseButton(0) && draggingBlock != null)
+
+        if (!pressed && !held && !released && Mouse.current != null)
         {
-            MoveDrag(Input.mousePosition);
+            pointerPos = Mouse.current.position.ReadValue();
+            pressed = Mouse.current.leftButton.wasPressedThisFrame;
+            held = Mouse.current.leftButton.isPressed;
+            released = Mouse.current.leftButton.wasReleasedThisFrame;
         }
-        // 3. Thả tay (Touch End)
-        else if (Input.GetMouseButtonUp(0) && draggingBlock != null)
+
+        if (released && draggingBlock != null)
         {
             EndDrag();
+        }
+        else if (pressed)
+        {
+            if (isTweening) return;
+            BeginDrag(pointerPos);
+        }
+        else if (held && draggingBlock != null)
+        {
+            MoveDrag(pointerPos);
         }
     }
 
@@ -73,7 +97,6 @@ public class PuzzleDragController : MonoBehaviour
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
         RaycastHit hit;
 
-        // Bắn tia ray kiểm tra xem có trúng Collider của Block nào không
         if (Physics.Raycast(ray, out hit))
         {
             DraggableBlock block = hit.collider.GetComponentInParent<DraggableBlock>();
@@ -82,23 +105,27 @@ public class PuzzleDragController : MonoBehaviour
                 draggingBlock = block;
                 draggingStartCol = block.col;
                 draggingStartRow = block.row;
-                originalScale = block.transform.localScale;
+                
+                // Lưu lại scale gốc chuẩn nếu khối không ở trong trạng thái tween dở dang
+                if (!isTweening)
+                {
+                    originalScale = block.transform.localScale;
+                }
 
-                // Tạm thời giải phóng các ô mà khối này đang chiếm giữ để tính toán di chuyển
                 RemoveBlockFromOccupied(block);
 
-                // Tính toán điểm lệch giữa vị trí chuột và tâm của khối
                 Vector3 hitWorldPos = GetMouseWorldPosOnGridPlane(screenPos);
-                dragPointerOffset = hit.collider.transform.position - hitWorldPos;
-                dragPointerOffset.y = 0; // Không tính toán lệch độ cao
+                
+                // SỬA TẠI ĐÂY: Dùng block.transform.position (Khối cha) thay vì hit.collider để tránh lệch trục
+                dragPointerOffset = block.transform.position - hitWorldPos;
+                dragPointerOffset.y = 0; 
 
-                // Thiết lập vị trí đích mong muốn (nhấc cao lên theo trục Y)
-                Vector3 targetPos = hit.collider.transform.position;
+                Vector3 targetPos = block.transform.position;
                 targetPos.y = gridManager.gridY + dragLiftY;
                 desiredDragPosition = targetPos;
 
-                // Chạy hiệu ứng nhấc khối lên (Phóng to nhẹ)
-                StartTween(block.transform.position, targetPos, originalScale, originalScale * holdScaleMultiplier, pickupDuration);
+                // Chạy hiệu ứng nhấc khối dựa trên scale hiện tại của khối cha
+                StartTween(block.transform.position, targetPos, block.transform.localScale, originalScale * holdScaleMultiplier, pickupDuration);
             }
         }
     }
@@ -141,9 +168,20 @@ public class PuzzleDragController : MonoBehaviour
         Vector3 snapWorldPos = gridManager.GridToWorld(finalRow, finalCol);
         
         // Chạy hiệu ứng hạ khối và co scale về bình thường
-        StartTween(draggingBlock.transform.position, snapWorldPos, draggingBlock.transform.localScale, originalScale, snapDuration, () => {
-            draggingBlock = null;
-        });
+        StartTween(
+            draggingBlock.transform.position,
+            snapWorldPos,
+            draggingBlock.transform.localScale,
+            originalScale,
+            snapDuration,
+            () => { draggingBlock = null; }
+        );
+
+        if (CheckGroupAssembled(draggingBlock.colorGroup))
+        {
+            Debug.Log($"Nhóm màu {draggingBlock.colorGroup} đã xếp khớp tương đối!");
+            // Kích hoạt hiệu ứng nổ khối hoặc ẩn khối tại đây...
+        }
     }
 
     private void UpdateDragFollow()
@@ -155,7 +193,6 @@ public class PuzzleDragController : MonoBehaviour
         draggingBlock.transform.position = Vector3.Lerp(draggingBlock.transform.position, desiredDragPosition, t);
     }
 
-    // Lấy tọa độ chuột trên một mặt phẳng ảo nằm ngang tại độ cao đặt khối
     private Vector3 GetMouseWorldPosOnGridPlane(Vector2 screenPos)
     {
         Plane plane = new Plane(Vector3.up, new Vector3(0, gridManager.gridY, 0));
@@ -256,5 +293,42 @@ public class PuzzleDragController : MonoBehaviour
             isTweening = false;
             onTweenCompleteCallback?.Invoke();
         }
+    }
+
+    // Hàm kiểm tra xem một nhóm màu đã được xếp khớp tương đối với nhau chưa
+    private bool CheckGroupAssembled(string colorGroup)
+    {
+        if (string.IsNullOrEmpty(colorGroup) || blocksRoot == null) return false;
+
+        // 1. Lấy ra tất cả các block thuộc nhóm màu này
+        DraggableBlock[] allBlocks = blocksRoot.GetComponentsInChildren<DraggableBlock>();
+        List<DraggableBlock> groupBlocks = new List<DraggableBlock>();
+        
+        foreach (var b in allBlocks)
+        {
+            if (b.enabled && b.colorGroup == colorGroup)
+            {
+                groupBlocks.Add(b);
+            }
+        }
+
+        if (groupBlocks.Count == 0) return false;
+
+        // 2. Tính toán độ lệch tương đối dựa trên khối đầu tiên trong danh sách
+        DraggableBlock first = groupBlocks[0];
+        int offsetX = first.col - first.targetCol;
+        int offsetY = first.row - first.targetRow;
+
+        // 3. Kiểm tra xem các khối còn lại có cùng độ lệch không
+        for (int i = 1; i < groupBlocks.Count; i++)
+        {
+            DraggableBlock block = groupBlocks[i];
+            if ((block.col - block.targetCol) != offsetX || (block.row - block.targetRow) != offsetY)
+            {
+                return false; // Chỉ cần 1 khối lệch hàng/cột là chưa khớp
+            }
+        }
+
+        return true; // Toàn bộ nhóm đã khớp hoàn hảo!
     }
 }

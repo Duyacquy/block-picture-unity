@@ -40,17 +40,32 @@ public class BoardGridManager : MonoBehaviour
         return new Vector2Int(Mathf.Clamp(row, 0, rows - 1), Mathf.Clamp(col, 0, cols - 1));
     }
 
-    // Vẽ lưới trong Editor để bạn nhìn vào đó mà xếp các ô FBX cho thẳng hàng
     private void OnDrawGizmos()
     {
-        Gizmos.color = Color.cyan;
         for (int r = 0; r < rows; r++)
         {
             for (int c = 0; c < cols; c++)
             {
                 Vector3 cellPos = GridToWorld(r, c);
+
+                Gizmos.color = Color.cyan;
                 Gizmos.DrawWireCube(cellPos, new Vector3(cellStep * 0.95f, 0.02f, cellStep * 0.95f));
             }
         }
+
+        DrawGridPointMarker(0, 0, Color.red);      // row 0, col 0
+        DrawGridPointMarker(1, 0, Color.yellow);   // row 1, col 0
+        DrawGridPointMarker(0, 1, Color.green);    // row 0, col 1
+    }
+
+    private void DrawGridPointMarker(int row, int col, Color color)
+    {
+        if (row < 0 || row >= rows || col < 0 || col >= cols) return;
+
+        Gizmos.color = color;
+        Vector3 pos = GridToWorld(row, col);
+        pos.y += 0.08f;
+
+        Gizmos.DrawSphere(pos, cellStep * 0.15f);
     }
 }

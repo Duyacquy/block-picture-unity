@@ -16,6 +16,8 @@ public class ImageSliceManager : MonoBehaviour
     [Header("References")]
     public Transform blocksRoot; // Kéo GameObject "Blocks" chứa các block vào đây
 
+    public BoardGridManager gridManager;
+
     private class GroupBounds
     {
         public int minCol = int.MaxValue;
@@ -120,18 +122,24 @@ public class ImageSliceManager : MonoBehaviour
             // Tiến hành gán hình ảnh, tỉ lệ co giãn (Tiling) và vị trí cắt (Offset)
             if (targetMat != null)
             {
-                // Cấu hình chuẩn cho Shader Standard cũ
                 targetMat.mainTexture = groupTex;
-                targetMat.mainTextureScale = new Vector2(tilingX, tilingY);
-                targetMat.mainTextureOffset = new Vector2(offsetX, offsetY);
+                targetMat.mainTextureScale = Vector2.one;
+                targetMat.mainTextureOffset = Vector2.zero;
 
-                // Cấu hình chuẩn nâng cao cho Shader URP mới của Unity 6 (Tránh lỗi không nhận thuộc tính ảnh)
                 if (targetMat.HasProperty("_BaseMap"))
                 {
                     targetMat.SetTexture("_BaseMap", groupTex);
-                    targetMat.SetTextureScale("_BaseMap", new Vector2(tilingX, tilingY));
-                    targetMat.SetTextureOffset("_BaseMap", new Vector2(offsetX, offsetY));
+                    targetMat.SetTextureScale("_BaseMap", Vector2.one);
+                    targetMat.SetTextureOffset("_BaseMap", Vector2.zero);
                 }
+
+                BakeImageLayerUV(
+                    visuals.topRenderer,
+                    block,
+                    bounds,
+                    totalCols,
+                    totalRows
+                );
             }
         }
     }
@@ -143,5 +151,93 @@ public class ImageSliceManager : MonoBehaviour
             if (config.colorGroup == colorGroup) return config.fullTexture;
         }
         return null;
+    }
+
+    private void BakeImageLayerUV(
+        MeshRenderer imageRenderer,
+        DraggableBlock block,
+        GroupBounds bounds,
+        float totalCols,
+        float totalRows
+    )
+    {
+        MeshFilter meshFilter = imageRenderer.GetComponent<MeshFilter>();
+        if (meshFilter == null)
+            meshFilter = imageRenderer.gameObject.AddComponent<MeshFilter>();
+
+        int minShapeX = int.MaxValue;
+        int minShapeY = int.MaxValue;
+        int maxShapeX = int.MinValue;
+        int maxShapeY = int.MinValue;
+
+        foreach (Vector2Int cell in block.shape)
+        {
+            minShapeX = Mathf.Min(minShapeX, cell.x);
+            minShapeY = Mathf.Min(minShapeY, cell.y);
+            maxShapeX = Mathf.Max(maxShapeX, cell.x);
+            maxShapeY = Mathf.Max(maxShapeY, cell.y);
+        }
+
+        float blockCols = maxShapeX - minShapeX + 1;
+        float blockRows = maxShapeY - minShapeY + 1;
+
+        Mesh mesh = new Mesh();
+        mesh.name = block.name + "_ImageLayerMesh";
+
+        List<Vector3> vertices = new List<Vector3>();
+        List<Vector2> uvs = new List<Vector2>();
+        List<int> triangles = new List<int>();
+
+        foreach (Vector2Int cell in block.shape)
+        {
+            int index = vertices.Count;
+
+            float left = ((cell.x - minShapeX) / blockCols) - 0.5f;
+            float right = ((cell.x - minShapeX + 1) / blockCols) - 0.5f;
+
+            float top = 0.5f - ((cell.y - minShapeY) / blockRows);
+            float bottom = 0.5f - ((cell.y - minShapeY + 1) / blockRows);
+
+            vertices.Add(new Vector3(left, 0f, bottom));
+            vertices.Add(new Vector3(right, 0f, bottom));
+            vertices.Add(new Vector3(right, 0f, top));
+            vertices.Add(new Vector3(left, 0f, top));
+
+            float imageCol = block.targetCol + cell.x - bounds.minCol;
+            float imageRow = block.targetRow + cell.y - bounds.minRow;
+
+            float u0 = imageCol / totalCols;
+            float u1 = (imageCol + 1f) / totalCols;
+
+            float vTop = 1f - imageRow / totalRows;
+            float vBottom = 1f - (imageRow + 1f) / totalRows;
+
+            uvs.Add(new Vector2(u0, vBottom));
+            uvs.Add(new Vector2(u1, vBottom));
+            uvs.Add(new Vector2(u1, vTop));
+            uvs.Add(new Vector2(u0, vTop));
+
+            triangles.Add(index + 0);
+            triangles.Add(index + 2);
+            triangles.Add(index + 1);
+
+            triangles.Add(index + 0);
+            triangles.Add(index + 3);
+            triangles.Add(index + 2);
+        }
+
+        mesh.SetVertices(vertices);
+        mesh.SetUVs(0, uvs);
+        mesh.SetTriangles(triangles, 0);
+        mesh.RecalculateBounds();
+        mesh.RecalculateNormals();
+
+        meshFilter.sharedMesh = mesh;
+
+        imageRenderer.transform.localRotation = Quaternion.identity;
+        imageRenderer.transform.localPosition = new Vector3(0.5f, imageRenderer.transform.localPosition.y, 0f);
+
+        // Scale ImageLayer phủ đúng footprint.
+        imageRenderer.transform.localScale = new Vector3(blockCols, 1f, blockRows);
     }
 }
