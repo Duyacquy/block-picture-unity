@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections.Generic;
+using System.Collections;
+using UnityEngine.UI;
 
 public class PuzzleDragController : MonoBehaviour
 {
@@ -24,12 +26,12 @@ public class PuzzleDragController : MonoBehaviour
     private Vector3 desiredDragPosition;
     private Vector3 dragPointerOffset;
     private Vector3 originalScale;
-    
+
     private int draggingStartCol;
     private int draggingStartRow;
     private int draggingCurrentCol; // Vị trí cột thực tế an toàn hiện tại lúc kéo
     private int draggingCurrentRow; // Vị trí hàng thực tế an toàn hiện tại lúc kéo
-    
+
     private bool isTweening = false;
     private float tweenTimer = 0f;
     private float currentTweenDuration = 0f;
@@ -38,7 +40,15 @@ public class PuzzleDragController : MonoBehaviour
     private Vector3 tweenStartScale;
     private Vector3 tweenEndScale;
 
-    private Vector3 lastValidDragPosition; // Mốc vị trí không gian 3D an toàn cuối cùng
+    private Vector3 lastValidDragPosition;
+
+    [Header("VFX Completed Settings")]
+    public GameObject flashParticlePrefab;
+    public GameObject shatterFragmentPrefab;
+    public GameObject starTrailParticlePrefab;
+    public Transform uiCanvasRoot;
+    public float imageFlyDuration = 0.6f;
+    public Transform targetBarsRoot;
 
     private void Start()
     {
@@ -47,7 +57,7 @@ public class PuzzleDragController : MonoBehaviour
         SnapAllBlocksToGridInstant();
         RebuildOccupied(); //
     }
-    
+
     private void SnapAllBlocksToGridInstant()
     {
         if (blocksRoot == null || gridManager == null) return;
@@ -107,7 +117,7 @@ public class PuzzleDragController : MonoBehaviour
     private void BeginDrag(Vector2 screenPos)
     {
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
-        RaycastHit hit; 
+        RaycastHit hit;
 
         if (Physics.Raycast(ray, out hit)) //
         {
@@ -138,7 +148,7 @@ public class PuzzleDragController : MonoBehaviour
                 lastValidDragPosition = block.transform.position;
 
                 StartTween(block.transform.position, targetPos, block.transform.localScale, originalScale * holdScaleMultiplier, pickupDuration); //
-                
+
                 block.ToggleOutline(true);
             }
         }
@@ -216,7 +226,7 @@ public class PuzzleDragController : MonoBehaviour
         {
             draggingBlock.ToggleOutline(false);
         }
-        
+
         // Khóa mục tiêu hạ cánh chuẩn xác tại ô Grid an toàn cuối cùng mà hệ thống tìm đường chấp thuận
         int finalCol = draggingCurrentCol;
         int finalRow = draggingCurrentRow;
@@ -246,7 +256,24 @@ public class PuzzleDragController : MonoBehaviour
 
         if (CheckGroupAssembled(draggingBlock.colorGroup)) //
         {
-            Debug.Log($"Nhóm màu {draggingBlock.colorGroup} đã xếp khớp tương đối!"); //
+            Debug.Log($"Nhóm màu {draggingBlock.colorGroup} đã xếp khớp tương đối!");
+
+            DraggableBlock[] allBlocks = blocksRoot.GetComponentsInChildren<DraggableBlock>();
+            List<DraggableBlock> groupBlocks = new List<DraggableBlock>();
+            foreach (var b in allBlocks)
+            {
+                if (b.enabled && b.colorGroup == draggingBlock.colorGroup)
+                {
+                    groupBlocks.Add(b);
+
+                    // Tắt toàn bộ Collider của nhóm này ngay lập tức để tránh người chơi click nhầm
+                    b.enabled = false;
+                    foreach (var col in b.GetComponentsInChildren<Collider>()) col.enabled = false;
+                }
+            }
+
+            // 2. Kích hoạt chuỗi hoạt ảnh nổ khối - bay tranh
+            StartCoroutine(PlayGroupShatterSequence(groupBlocks, draggingBlock.colorGroup));
         }
     }
 
@@ -436,7 +463,7 @@ public class PuzzleDragController : MonoBehaviour
     {
         occupiedCells.Clear(); //
         if (blocksRoot == null) return; //
-        
+
         DraggableBlock[] blocks = blocksRoot.GetComponentsInChildren<DraggableBlock>(); //
         foreach (DraggableBlock block in blocks) //
         {
@@ -508,7 +535,7 @@ public class PuzzleDragController : MonoBehaviour
 
         DraggableBlock[] allBlocks = blocksRoot.GetComponentsInChildren<DraggableBlock>(); //
         List<DraggableBlock> groupBlocks = new List<DraggableBlock>(); //
-        
+
         foreach (var b in allBlocks) //
         {
             if (b.enabled && b.colorGroup == colorGroup) groupBlocks.Add(b); //
@@ -527,4 +554,202 @@ public class PuzzleDragController : MonoBehaviour
         }
         return true; //
     }
+
+    private IEnumerator PlayGroupShatterSequence(List<DraggableBlock> blocks, string colorGroup)
+    {
+        // --- GIAI ĐOẠN 1: BÙNG SÁNG TẠI CÁC Ô LƯỚI ---
+        Vector3 sumWorldPos = Vector3.zero;
+        int totalCells = 0;
+
+        foreach (var block in blocks)
+        {
+            foreach (Vector2Int cell in block.shape)
+            {
+                // Tính toán vị trí world chính xác của từng ô nhỏ để sinh tia sáng
+                Vector3 cellWorldPos = block.transform.TransformPoint(new Vector3(cell.x * gridManager.cellStep, 0f, -cell.y * gridManager.cellStep));
+                sumWorldPos += cellWorldPos;
+                totalCells++;
+
+                if (flashParticlePrefab != null)
+                {
+                    Instantiate(flashParticlePrefab, cellWorldPos + Vector3.up * 0.1f, Quaternion.identity);
+                }
+            }
+        }
+        // Tính trọng tâm của cả nhóm màu trong không gian 3D
+        Vector3 groupCenterWorld = sumWorldPos / totalCells;
+
+        // Chờ 0.06 giây cho hiệu ứng chớp sáng đạt đỉnh chói (Khớp Ảnh 1)
+        yield return new WaitForSeconds(0.06f);
+
+        // --- GIAI ĐOẠN 2: BẮN MẢNH VỠ 3D & TẠO ẢNH UI BAY ---
+        // Trích xuất Texture mục tiêu từ ImageSliceManager của bạn
+        ImageSliceManager sliceManager = FindAnyObjectByType<ImageSliceManager>();
+        Texture2D groupTexture = sliceManager != null ? sliceManager.textureConfig.Find(t => t.colorGroup == colorGroup).fullTexture : null;
+
+        Transform targetUiSlot = null;
+        if (targetBarsRoot != null)
+        {
+            // Duyệt qua tất cả các con và cháu bên trong TargetBars
+            foreach (Transform child in targetBarsRoot.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name == colorGroup)
+                {
+                    targetUiSlot = child;
+                    break; // Đã tìm thấy node vật phẩm (ví dụ: Pan), thoát vòng lặp
+                }
+            }
+        }
+
+        GameObject flyingImageObj = null;
+        if (groupTexture != null && targetUiSlot != null && uiCanvasRoot != null)
+        {
+            // Khởi tạo một UI Image động để làm ảnh bay
+            flyingImageObj = new GameObject($"FlyingImage_{colorGroup}");
+            flyingImageObj.transform.SetParent(uiCanvasRoot, false);
+
+            var rect = flyingImageObj.AddComponent<RectTransform>();
+            rect.sizeDelta = new Vector2(120, 120); // Kích thước hiển thị ban đầu của ảnh bay
+
+            var img = flyingImageObj.AddComponent<Image>();
+            img.sprite = Sprite.Create(groupTexture, new Rect(0, 0, groupTexture.width, groupTexture.height), new Vector2(0.5f, 0.5f));
+
+            Vector3 screenPos = mainCamera.WorldToScreenPoint(groupCenterWorld);
+            rect.position = screenPos;
+        }
+
+        Color groupColor = Color.white;
+        if (blocks.Count > 0)
+        {
+            BlockVisuals visuals = blocks[0].GetComponent<BlockVisuals>();
+            if (visuals != null) groupColor = visuals.blockColor;
+        }
+
+        // Sinh lượng lớn mảnh vỡ tập trung tại tâm (Số mảnh = 15 mảnh * số lượng block)
+        int totalFragments = 15 * blocks.Count;
+        SpawnShatterFragmentsAtCenter(groupCenterWorld, groupColor, totalFragments);
+
+        // Xóa toàn bộ các khối 3D cũ trên bàn cờ
+        foreach (var block in blocks)
+        {
+            block.transform.localScale = Vector3.zero; 
+            Destroy(block.gameObject);
+        }
+
+        // Cập nhật lại từ điển ô trống của bàn cờ
+        RebuildOccupied();
+
+        // --- GIAI ĐOẠN 3: ĐUÔI SAO & TWEEN ẢNH UI VỀ ĐÍCH ---
+        if (flyingImageObj != null && targetUiSlot != null)
+        {
+            // Gắn hạt đuôi sao bay bám theo bức ảnh UI
+            GameObject trailFx = null;
+            if (starTrailParticlePrefab != null)
+            {
+                trailFx = Instantiate(starTrailParticlePrefab, flyingImageObj.transform);
+                trailFx.transform.localPosition = Vector3.zero;
+            }
+
+            RectTransform imgRect = flyingImageObj.GetComponent<RectTransform>();
+            Vector3 startUiPos = imgRect.position;
+            Vector3 startScale = imgRect.localScale;
+
+            float elapsed = 0f;
+            while (elapsed < imageFlyDuration)
+            {
+                elapsed += Time.deltaTime;
+                float t = Mathf.Clamp01(elapsed / imageFlyDuration);
+
+                // Sử dụng mượt mà SmoothStep hoặc SineInOut để đường bay tự nhiên
+                float tEased = Mathf.SmoothStep(0f, 1f, t);
+
+                // Cập nhật tọa độ bay bám theo vị trí thời gian thực của Target UI Slot (đề phòng UI động đậy)
+                imgRect.position = Vector3.Lerp(startUiPos, targetUiSlot.position, tEased);
+
+                // Thu nhỏ dần bức ảnh lại để vừa khít với kích thước ô chứa trên Target Bar
+                imgRect.localScale = Vector3.Lerp(startScale, startScale * 0.4f, tEased);
+
+                yield return null;
+            }
+
+            // Đã chạm đích: Xóa ảnh bay và kích hoạt hiệu ứng nảy nhẹ ăn mừng tại thẻ bài UI
+            if (trailFx != null) Destroy(trailFx);
+            Destroy(flyingImageObj);
+
+            // Bạn có thể kích hoạt hoạt ảnh Punch Scale tại thẻ bài UI đích ở đây
+            StartCoroutine(PunchScaleUI(targetUiSlot));
+        }
+    }
+
+    private void SpawnShatterFragmentsAtCenter(Vector3 centerWorldPos, Color blockColor, int fragmentCount)
+    {
+        for (int i = 0; i < fragmentCount; i++)
+        {
+            if (shatterFragmentPrefab == null) break;
+
+            // Sinh ngẫu nhiên rải rác trong phạm vi hẹp của khối (Rộng khoảng tầm ô lưới)
+            float spawnRangeX = Random.Range(-0.35f, 0.35f);
+            float spawnRangeZ = Random.Range(-0.35f, 0.35f);
+            Vector3 spawnPos = centerWorldPos + new Vector3(spawnRangeX, 0.05f, spawnRangeZ);
+
+            Quaternion randomRot = Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360));
+            GameObject frag = Instantiate(shatterFragmentPrefab, spawnPos, randomRot);
+
+            // Giữ nguyên kích cỡ to ghồ ghề bạn đã ưng ý
+            float scaleX = Random.Range(0.18f, 0.32f);
+            float scaleY = Random.Range(0.18f, 0.32f);
+            float scaleZ = Random.Range(0.18f, 0.32f);
+            frag.transform.localScale = new Vector3(scaleX, scaleY, scaleZ);
+
+            // Nhuộm màu khối gốc
+            MeshRenderer fragRenderer = frag.GetComponent<MeshRenderer>();
+            if (fragRenderer != null) fragRenderer.material.color = blockColor;
+
+            // ====================================================================
+            // KHẮC PHỤC CHÍ MẠNG: TẮT KHÓA COLLIDER ĐỂ CHỐNG "NỔ VẬT LÝ" BAY TỨ PHÍA
+            // ====================================================================
+            Collider fragCollider = frag.GetComponent<Collider>();
+            if (fragCollider != null)
+            {
+                fragCollider.enabled = false; // Tắt đi để các mảnh xuyên qua nhau, không đẩy nhau bay loạn nữa
+            }
+
+            Rigidbody rb = frag.GetComponent<Rigidbody>();
+            if (rb == null) rb = frag.AddComponent<Rigidbody>();
+
+            rb.useGravity = true; // Bật trọng lực để khối tự rơi xuống dưới bàn cờ
+
+            rb.linearVelocity = new Vector3(
+                Random.Range(-2.5f, 2.5f),
+                Random.Range(1.2f, 2.2f),
+                Random.Range(-2.5f, 2.5f)
+            );
+
+            // Giảm tốc độ tự xoay góc xuống mức vừa phải (Chuẩn Unity 6 dùng angularVelocity)
+            rb.angularVelocity = new Vector3(Random.Range(-3f, 3f), Random.Range(-3f, 3f), Random.Range(-3f, 3f));
+
+            // Tự động xóa sau khi rơi khuất xuống dưới
+            Destroy(frag, 1.2f);
+        }
+    }
+
+    private IEnumerator PunchScaleUI(Transform uiTarget)
+    {
+        Vector3 originScale = Vector3.one;
+        float duration = 0.2f;
+        float elapsed = 0f;
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float progress = elapsed / duration;
+            float wave = Mathf.Sin(progress * Mathf.PI);
+
+            // Thẻ UI nảy to lên 15% rồi thu hồi về kích thước chuẩn ban đầu
+            uiTarget.localScale = originScale * (1f + (wave * 0.15f));
+            yield return null;
+        }
+        uiTarget.localScale = originScale;
+    }
+
 }
