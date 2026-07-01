@@ -235,7 +235,7 @@ public class ImageSliceManager : MonoBehaviour
         meshFilter.sharedMesh = mesh;
 
         imageRenderer.transform.localRotation = Quaternion.identity;
-        imageRenderer.transform.localPosition = new Vector3(0.5f, imageRenderer.transform.localPosition.y, 0f);
+        imageRenderer.transform.localPosition = new Vector3(imageRenderer.transform.localPosition.x, imageRenderer.transform.localPosition.y, imageRenderer.transform.localPosition.z);
 
         // Scale ImageLayer phủ đúng footprint.
         imageRenderer.transform.localScale = new Vector3(blockCols, 1f, blockRows);
