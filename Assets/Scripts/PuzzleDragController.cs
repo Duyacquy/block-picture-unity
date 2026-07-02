@@ -18,8 +18,12 @@ public class PuzzleDragController : MonoBehaviour
     public float dragFollowSharpness = 20f;  // Độ mượt/độ bám của khối theo chuột
     public float holdScaleMultiplier = 1.05f;// Tỷ lệ phóng to khi giữ khối
 
-    // Lưu trữ trạng thái chiếm chỗ của các ô trên Grid
-    // Key: "row_col", Value: Block đang chiếm ô đó
+    [Header("Custom TargetBar Layout Settings")]
+    [Tooltip("Khoảng cách mặc định cố định giữa các thanh mục tiêu")]
+    public float targetBarSpacing = 40f; 
+    [Tooltip("Thời gian dịch chuyển dồn hàng chậm rãi, mượt mà (giây)")]
+    public float rearrangeDuration = 0.6f;
+
     private Dictionary<string, DraggableBlock> occupiedCells = new Dictionary<string, DraggableBlock>();
 
     private DraggableBlock draggingBlock = null;
@@ -49,13 +53,24 @@ public class PuzzleDragController : MonoBehaviour
     public Transform uiCanvasRoot;
     public float imageFlyDuration = 0.6f;
     public Transform targetBarsRoot;
+    public Sprite greenCheckmarkSprite;
+
+    [Header("Click VFX (Pure Code C#)")]
+    [Tooltip("Kéo trực tiếp file ảnh Sprite ngôi sao vàng vào ô này")]
+    public Sprite starSprite; 
+    [Tooltip("Số lượng ngôi sao bắn ra mỗi lần nhấp chuột/chạm tay")]
+    public int clickStarCount = 8; 
+    [Tooltip("Thời gian tồn tại của ngôi sao trước khi biến mất (giây)")]
+    public float clickStarLifeTime = 1f;
 
     private void Start()
     {
         if (gridManager == null) gridManager = FindAnyObjectByType<BoardGridManager>();
 
         SnapAllBlocksToGridInstant();
-        RebuildOccupied(); //
+        RebuildOccupied();
+
+        InitializeTargetBarsLayout();
     }
 
     private void SnapAllBlocksToGridInstant()
@@ -108,10 +123,99 @@ public class PuzzleDragController : MonoBehaviour
         if (released && draggingBlock != null) EndDrag(); //
         else if (pressed) //
         {
+            SpawnClickStarsPureCode(pointerPos);
+
             if (isTweening) return; //
             BeginDrag(pointerPos); //
         }
         else if (held && draggingBlock != null) MoveDrag(pointerPos); //
+    }
+
+    private void SpawnClickStarsPureCode(Vector2 screenPos)
+    {
+        // Điều kiện bảo hiểm: Nếu chưa kéo thả ảnh Sprite hoặc chưa gán Canvas Root thì dừng
+        if (starSprite == null || uiCanvasRoot == null) return;
+
+        for (int i = 0; i < clickStarCount; i++)
+        {
+            // 1. Khởi tạo đối tượng UI thuần túy chứa đầy đủ linh hồn cấu phần Canvas
+            GameObject starObj = new GameObject("UI_CodeStar", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
+            
+            // Đặt làm con của Canvas Root. Đối tượng sinh sau sẽ tự động đè lên trên tất cả UI có sẵn!
+            starObj.transform.SetParent(uiCanvasRoot, false);
+
+            RectTransform rect = starObj.GetComponent<RectTransform>();
+            
+            // Vì là đối tượng UI, ta gán thẳng tọa độ Screen (Pixel) của chuột/ngón tay mà không cần Raycast 3D nữa!
+            rect.position = screenPos; 
+
+            Image img = starObj.GetComponent<Image>();
+            img.sprite = starSprite;
+
+            // 2. ĐO KÍCH THƯỚC THEO PIXEL: Chỉnh ngôi sao UI nhỏ xinh vừa vặn màn hình (Rộng từ 80 đến 100  pixel)
+            float baseSize = Random.Range(70f, 85f);
+            rect.sizeDelta = new Vector2(baseSize, baseSize);
+
+            // 3. THUẬT TOÁN TỦA TRÒN 2D: Tính góc xoay vòng tròn 360 độ trên mặt phẳng màn hình phẳng
+            float angle = Random.Range(0f, Mathf.PI * 2f);
+            
+            // Tốc độ di chuyển tính theo đơn vị Pixel/Giây (Cần số to hơn mốc 3D cũ để bay nhanh)
+            float speed = Random.Range(280f, 550f); 
+
+            // Hướng bay tủa đều ra các phía, cộng nhẹ một lực hướng lên trên (+Y) cho đẹp mắt
+            Vector3 flyDirection = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle) + 0.3f, 0f).normalized;
+
+            CanvasGroup group = starObj.GetComponent<CanvasGroup>();
+            
+            // Kích hoạt luồng hoạt ảnh xử lý động lực học UI độc lập
+            StartCoroutine(AnimateUIStarRoutine(starObj, rect, group, flyDirection, speed));
+        }
+    }
+
+    // COROUTINE VÒNG ĐỜI: Điều khiển trọng lực pixel, lộn vòng và mờ dần Alpha trên Canvas
+    private IEnumerator AnimateUIStarRoutine(GameObject star, RectTransform rect, CanvasGroup group, Vector3 direction, float speed)
+    {
+        float elapsed = 0f;
+        Vector3 initialScale = rect.localScale;
+        Vector3 currentVelocity = direction * speed;
+        
+        // TRỌNG LỰC PIXEL: Lực hút kéo các ngôi sao UI rơi rụng dần xuống đáy màn hình (-Y)
+        float gravityModifier = 1100f; 
+        
+        // Tốc độ tự lộn vòng quanh tâm góc phẳng
+        float rotationSpeed = Random.Range(-360f, 360f);
+
+        while (elapsed < clickStarLifeTime)
+        {
+            // Bảo hiểm dữ liệu nếu người chơi chuyển cảnh đột ngột
+            if (star == null || rect == null) yield break;
+
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / clickStarLifeTime);
+
+            // A. ĐỘNG LỰC HỌC PIXEL: Trừ dần vận tốc Y theo thời gian để tạo độ rơi tự do
+            currentVelocity.y -= gravityModifier * Time.deltaTime;
+
+            // B. TỊNH TIẾN UI: Cộng dồn vận tốc pixel vào tọa độ position của UI ngoài màn hình
+            rect.position += currentVelocity * Time.deltaTime;
+
+            // C. TỰ XOAY: Lộn vòng tròn quanh trục Z phẳng
+            rect.Rotate(Vector3.forward, rotationSpeed * Time.deltaTime);
+
+            // D. THU NHỎ DẦN: Co rụt tỷ lệ scale đều đặn về mốc 0
+            rect.localScale = Vector3.Lerp(initialScale, Vector3.zero, progress);
+
+            // E. TÀNG HÌNH MỊN MÀNG: Giảm dần độ suốt suốt Alpha của CanvasGroup về 0 ở cuối đời
+            if (group != null)
+            {
+                group.alpha = 1f - progress;
+            }
+
+            yield return null;
+        }
+
+        // Đã hoàn thành vòng đời: Xóa bỏ GameObject khỏi bộ nhớ RAM
+        if (star != null) Destroy(star);
     }
 
     private void BeginDrag(Vector2 screenPos)
@@ -607,26 +711,44 @@ public class PuzzleDragController : MonoBehaviour
         Transform targetUiSlot = null;
         if (targetBarsRoot != null)
         {
-            // Duyệt qua tất cả các con và cháu bên trong TargetBars
             foreach (Transform child in targetBarsRoot.GetComponentsInChildren<Transform>(true))
             {
                 if (child.name == colorGroup)
                 {
                     targetUiSlot = child;
-                    break; // Đã tìm thấy node vật phẩm (ví dụ: Pan), thoát vòng lặp
+                    break; 
                 }
+            }
+        }
+
+        // ĐỊNH NGHĨA KÍCH THƯỚC BAN ĐẦU KHI VỪA VỠ TRANH KHỐI
+        Vector2 initialLargeSize = new Vector2(260f, 390f);
+
+        if (groupTexture != null)
+        {
+            float maxBaseline = 390f;
+            float aspectRatio = (float)groupTexture.width / groupTexture.height; // Tỷ lệ Rộng / Cao thực tế của ảnh
+
+            if (aspectRatio > 1f) 
+            {
+                initialLargeSize = new Vector2(maxBaseline, maxBaseline / aspectRatio);
+            }
+            else 
+            {
+                initialLargeSize = new Vector2(maxBaseline * aspectRatio, maxBaseline);
             }
         }
 
         GameObject flyingImageObj = null;
         if (groupTexture != null && targetUiSlot != null && uiCanvasRoot != null)
         {
-            // Khởi tạo một UI Image động để làm ảnh bay
             flyingImageObj = new GameObject($"FlyingImage_{colorGroup}");
             flyingImageObj.transform.SetParent(uiCanvasRoot, false);
 
             var rect = flyingImageObj.AddComponent<RectTransform>();
-            rect.sizeDelta = new Vector2(120, 120); // Kích thước hiển thị ban đầu của ảnh bay
+            
+            // Ép bức ảnh động xuất hiện với kích thước to rõ ràng ngay từ đầu
+            rect.sizeDelta = initialLargeSize; 
 
             var img = flyingImageObj.AddComponent<Image>();
             img.sprite = Sprite.Create(groupTexture, new Rect(0, 0, groupTexture.width, groupTexture.height), new Vector2(0.5f, 0.5f));
@@ -644,20 +766,16 @@ public class PuzzleDragController : MonoBehaviour
 
         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.blockBreak);
 
-        // Sinh lượng lớn mảnh vỡ tập trung tại tâm (Số mảnh = 15 mảnh * số lượng block)
-        int totalFragments = 15 * blocks.Count;
+        int totalFragments = 10 * blocks.Count;
         SpawnShatterFragmentsAtCenter(groupCenterWorld, groupColor, totalFragments);
 
-        // Xóa toàn bộ các khối 3D cũ trên bàn cờ
         foreach (var block in blocks)
         {
             block.transform.localScale = Vector3.zero; 
             Destroy(block.gameObject);
         }
 
-        // Cập nhật lại từ điển ô trống của bàn cờ
         RebuildOccupied();
-
         CheckWin();
 
         // --- GIAI ĐOẠN 3: ĐUÔI SAO & TWEEN ẢNH UI VỀ ĐÍCH ---
@@ -672,7 +790,11 @@ public class PuzzleDragController : MonoBehaviour
 
             RectTransform imgRect = flyingImageObj.GetComponent<RectTransform>();
             Vector3 startUiPos = imgRect.position;
-            Vector3 startScale = imgRect.localScale;
+
+            // ĐO ĐẠC THỰC TẾ: Lấy thông số kích thước hình vuông khít khao của ô chứa trên thanh Target Bar
+            RectTransform targetRect = targetUiSlot.GetComponent<RectTransform>();
+            Vector2 finalTargetSize = targetRect != null ? targetRect.sizeDelta : new Vector2(100f, 100f);
+            Vector3 finalTargetScale = targetRect != null ? targetRect.localScale : Vector3.one;
 
             float elapsed = 0f;
             while (elapsed < imageFlyDuration)
@@ -680,19 +802,18 @@ public class PuzzleDragController : MonoBehaviour
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / imageFlyDuration);
 
-                // Sử dụng mượt mà SmoothStep hoặc SineInOut để đường bay tự nhiên
+                // Đường bay cong mượt mà tự nhiên
                 float tEased = Mathf.SmoothStep(0f, 1f, t);
 
-                // Cập nhật tọa độ bay bám theo vị trí thời gian thực của Target UI Slot (đề phòng UI động đậy)
                 imgRect.position = Vector3.Lerp(startUiPos, targetUiSlot.position, tEased);
 
-                // Thu nhỏ dần bức ảnh lại để vừa khít với kích thước ô chứa trên Target Bar
-                imgRect.localScale = Vector3.Lerp(startScale, startScale * 0.4f, tEased);
+                imgRect.sizeDelta = Vector2.Lerp(initialLargeSize, finalTargetSize, tEased);
+                imgRect.localScale = Vector3.Lerp(Vector3.one, finalTargetScale, tEased);
 
                 yield return null;
             }
 
-            // Đã chạm đích: Xóa ảnh bay và kích hoạt hiệu ứng nảy nhẹ ăn mừng tại thẻ bài UI
+            // Đã chạm đích khít khao: Dọn dẹp ảnh bay
             if (trailFx != null) Destroy(trailFx);
             Destroy(flyingImageObj);
 
@@ -700,7 +821,7 @@ public class PuzzleDragController : MonoBehaviour
 
             if (targetUiSlot.parent != null && targetUiSlot.parent != targetBarsRoot)
             {
-                StartCoroutine(PunchScaleUI(targetUiSlot.parent));
+                StartCoroutine(PlayTargetBarJuiceEffect(targetUiSlot, targetUiSlot.parent));
             }
         }
     }
@@ -711,9 +832,9 @@ public class PuzzleDragController : MonoBehaviour
         {
             if (shatterFragmentPrefab == null) break;
 
-            // Sinh ngẫu nhiên rải rác trong phạm vi hẹp của khối (Rộng khoảng tầm ô lưới)
+            // Sinh ngẫu nhiên rải rác trong phạm vi hẹp của khối
             float spawnRangeX = Random.Range(-0.35f, 0.35f);
-            float spawnRangeZ = Random.Range(-0.35f, 0.35f);
+            float spawnRangeZ = Random.Range(-0.5f, 0.5f);
             Vector3 spawnPos = centerWorldPos + new Vector3(spawnRangeX, 0.05f, spawnRangeZ);
 
             Quaternion randomRot = Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360));
@@ -721,7 +842,7 @@ public class PuzzleDragController : MonoBehaviour
 
             // Giữ nguyên kích cỡ to ghồ ghề bạn đã ưng ý
             float scaleX = Random.Range(0.18f, 0.32f);
-            float scaleY = Random.Range(0.18f, 0.32f);
+            float scaleY = Random.Range(0.32f, 0.64f);
             float scaleZ = Random.Range(0.18f, 0.32f);
             frag.transform.localScale = new Vector3(scaleX, scaleY, scaleZ);
 
@@ -729,51 +850,302 @@ public class PuzzleDragController : MonoBehaviour
             MeshRenderer fragRenderer = frag.GetComponent<MeshRenderer>();
             if (fragRenderer != null) fragRenderer.material.color = blockColor;
 
-            // ====================================================================
-            // KHẮC PHỤC CHÍ MẠNG: TẮT KHÓA COLLIDER ĐỂ CHỐNG "NỔ VẬT LÝ" BAY TỨ PHÍA
-            // ====================================================================
+            // Tắt collider chống nổ vật lý loạn xạ
             Collider fragCollider = frag.GetComponent<Collider>();
-            if (fragCollider != null)
-            {
-                fragCollider.enabled = false; // Tắt đi để các mảnh xuyên qua nhau, không đẩy nhau bay loạn nữa
-            }
+            if (fragCollider != null) fragCollider.enabled = false;
 
             Rigidbody rb = frag.GetComponent<Rigidbody>();
             if (rb == null) rb = frag.AddComponent<Rigidbody>();
 
-            rb.useGravity = true; // Bật trọng lực để khối tự rơi xuống dưới bàn cờ
+            rb.useGravity = false; // BẮT BUỘC TẮT: Để triệt tiêu lực kéo xuống theo trục Y mặc định
+
+            // Thêm cấu phần lực liên tục để giả lập trọng lực theo trục Z
+            ConstantForce cf = frag.GetComponent<ConstantForce>();
+            if (cf == null) cf = frag.AddComponent<ConstantForce>();
+            
+            cf.force = new Vector3(0f, 0f, -12f); 
 
             rb.linearVelocity = new Vector3(
-                Random.Range(-2.5f, 2.5f),
-                Random.Range(1.2f, 2.2f),
-                Random.Range(-2.5f, 2.5f)
+                Random.Range(-2.5f, 2.5f), // Bung theo chiều ngang X
+                Random.Range(-2.5f, 2.5f), // Bung theo chiều đứng Y (nếu bàn cờ dựng đứng)
+                Random.Range(1.5f, 3.0f)   // Bắn mạnh về hướng +Z một nhịp trước khi bị lực ép lùi về -Z
             );
 
-            // Giảm tốc độ tự xoay góc xuống mức vừa phải (Chuẩn Unity 6 dùng angularVelocity)
+            // Giảm tốc độ tự xoay góc xuống mức vừa phải
             rb.angularVelocity = new Vector3(Random.Range(-3f, 3f), Random.Range(-3f, 3f), Random.Range(-3f, 3f));
 
-            // Tự động xóa sau khi rơi khuất xuống dưới
+            // Tự động xóa sau khi rơi khuất
             Destroy(frag, 1.2f);
         }
     }
 
-    private IEnumerator PunchScaleUI(Transform uiTarget)
+    // ====================================================================
+    // HÀM TỰ KHỞI TẠO BỐ CỤC: Ép cả cha lẫn con về tâm giữa để căn giữa 100%
+    // ====================================================================
+    public void InitializeTargetBarsLayout()
     {
-        Vector3 originScale = Vector3.one;
-        float duration = 0.2f;
-        float elapsed = 0f;
+        if (targetBarsRoot == null) return;
 
-        while (elapsed < duration)
+        // 1. 🔥 ÉP CONTAINER CHA TỔNG VỀ CHÍNH GIỮA MÀN HÌNH ĐỂ LÀM GỐC CHUẨN (0,0)
+        RectTransform parentRT = targetBarsRoot.GetComponent<RectTransform>();
+        if (parentRT != null)
         {
-            elapsed += Time.deltaTime;
-            float progress = elapsed / duration;
-            float wave = Mathf.Sin(progress * Mathf.PI);
+            parentRT.anchorMin = new Vector2(0.5f, 0.5f);
+            parentRT.anchorMax = new Vector2(0.5f, 0.5f);
+            parentRT.pivot = new Vector2(0.5f, 0.5f);
+            // Giữ nguyên cao độ Y, đưa trục X về đúng 0 để container nằm giữa màn hình
+            parentRT.anchoredPosition = new Vector2(0f, parentRT.anchoredPosition.y);
+        }
 
-            // Thẻ UI nảy to lên 15% rồi thu hồi về kích thước chuẩn ban đầu
-            uiTarget.localScale = originScale * (1f + (wave * 0.15f));
+        // 2. Thu thập các thanh con đang hoạt động
+        List<RectTransform> activeBars = new List<RectTransform>();
+        foreach (Transform child in targetBarsRoot)
+        {
+            if (child.gameObject.activeSelf)
+            {
+                RectTransform rt = child.GetComponent<RectTransform>();
+                if (rt != null) activeBars.Add(rt);
+            }
+        }
+
+        int count = activeBars.Count;
+        if (count == 0) return;
+
+        float barWidth = activeBars[0].rect.width;
+        if (barWidth <= 0) barWidth = 140f; 
+
+        // 3. Ép hệ neo của tất cả các quân con về trung tâm của chính nó
+        foreach (RectTransform bar in activeBars)
+        {
+            bar.anchorMin = new Vector2(0.5f, 0.5f);
+            bar.anchorMax = new Vector2(0.5f, 0.5f);
+            bar.pivot = new Vector2(0.5f, 0.5f);
+        }
+
+        // 4. Thuật toán chia đều khoảng cách từ mốc tâm 0
+        float totalLayoutWidth = (count * barWidth) + ((count - 1) * targetBarSpacing);
+        float startX = -totalLayoutWidth / 2f + barWidth / 2f;
+
+        for (int i = 0; i < count; i++)
+        {
+            float targetX = startX + i * (barWidth + targetBarSpacing);
+            activeBars[i].anchoredPosition = new Vector2(targetX, 0f);
+        }
+    }
+
+    // ====================================================================
+    // CHUỖI HIỆU ỨNG JUICY: AN TOÀN CHỐNG LỖI VÀ ĐỊNH VỊ CHUẨN XÁC GÓC THẢ THẺ
+    // ====================================================================
+    private IEnumerator PlayTargetBarJuiceEffect(Transform targetSlot, Transform targetParent)
+    {
+        if (targetParent == null) yield break;
+        RectTransform parentRect = targetParent.GetComponent<RectTransform>(); 
+        if (parentRect == null) yield break;
+
+        Vector2 originalAnchoredPos = parentRect.anchoredPosition;
+        Quaternion originalRotation = parentRect.localRotation;
+
+        // NHỊP 1: THẺ BÀI NHẢY LÊN 1 NHỊP RỒI RƠI XUỐNG CHỖ CŨ (Trục Y)
+        float jumpDuration = 0.35f;
+        float elapsed = 0f;
+        while (elapsed < jumpDuration)
+        {
+            if (parentRect == null) yield break;
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / jumpDuration);
+            float jumpY = Mathf.Sin(progress * Mathf.PI) * 70f; 
+            
+            parentRect.anchoredPosition = originalAnchoredPos + new Vector2(0f, jumpY);
             yield return null;
         }
-        uiTarget.localScale = originScale;
+        if (parentRect != null) parentRect.anchoredPosition = originalAnchoredPos;
+
+        yield return new WaitForSeconds(0.04f);
+        if (parentRect == null) yield break;
+
+        // NHỊP 2: SINH DẤU TÍCH XANH GHIM ĐỨNG IM TẠI GÓC DƯỚI PHẢI THẺ BÀI
+        Transform finalParent = targetBarsRoot != null ? targetBarsRoot : parentRect.parent;
+
+        if (greenCheckmarkSprite != null && finalParent != null)
+        {
+            GameObject checkmarkObj = new GameObject("GreenCheckmark", typeof(RectTransform), typeof(Image), typeof(CanvasGroup));
+            checkmarkObj.transform.SetParent(finalParent, false); 
+
+            RectTransform checkRect = checkmarkObj.GetComponent<RectTransform>();
+            checkRect.sizeDelta = new Vector2(105f, 105f); 
+
+            checkRect.anchorMin = new Vector2(0.5f, 0.5f);
+            checkRect.anchorMax = new Vector2(0.5f, 0.5f);
+            checkRect.pivot = new Vector2(0.5f, 0.5f); 
+
+            Vector3[] worldCorners = new Vector3[4];
+            parentRect.GetWorldCorners(worldCorners);
+            Vector3 targetBottomRightWorld = worldCorners[3]; 
+
+            checkmarkObj.transform.position = targetBottomRightWorld;
+            checkRect.anchoredPosition += new Vector2(-45f, 45f); 
+
+            Image checkImg = checkmarkObj.GetComponent<Image>();
+            checkImg.sprite = greenCheckmarkSprite;
+
+            CanvasGroup checkGroup = checkmarkObj.GetComponent<CanvasGroup>();
+            StartCoroutine(AnimateCheckmarkStaticRoutine(checkRect, checkGroup));
+        }
+
+        // NHỊP 3: THẺ BÀI XOAY LẬT NGANG TRỤC Y (DẤU TÍCH XANH ĐỨNG YÊN)
+        float spinDuration = 0.75f;
+        elapsed = 0f;
+        float totalRotation = 720f; 
+
+        while (elapsed < spinDuration)
+        {
+            if (parentRect == null) yield break;
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / spinDuration);
+            float tEased = Mathf.SmoothStep(0f, 1f, progress);
+
+            parentRect.localRotation = Quaternion.Euler(0f, tEased * totalRotation, 0f);
+            yield return null;
+        }
+
+        if (parentRect != null) parentRect.localRotation = originalRotation;
+
+        // GIAI ĐOẠN CUỐI: THANH MỤC TIÊU ẨN ĐI VÀ TỰ ĐỘNG DỒN DỊCH CHẬM RÃI VÀO GIỮA
+        yield return new WaitForSeconds(0.15f); 
+        
+        if (targetParent != null)
+        {
+            targetParent.gameObject.SetActive(false); // Ẩn quân bài đã hoàn thành
+        }
+
+        // Chạy luồng tự động căn giữa và dồn hàng mượt mà bằng code tự do
+        StartCoroutine(RearrangeTargetBarsSmoothly());
+    }
+
+    // ====================================================================
+    // THUẬT TOÁN ĐỒN DỊCH CHẬM RÃI, CÁCH ĐỀU VÀ LUÔN GIỮ BỐ CỤC CHÍ NHAU Ở GIỮA
+    // ====================================================================
+    private IEnumerator RearrangeTargetBarsSmoothly()
+    {
+        if (targetBarsRoot == null) yield break;
+
+        // 1. Bảo đảm container cha luôn khóa cứng vị trí chuẩn ở trung tâm màn hình
+        RectTransform parentRT = targetBarsRoot.GetComponent<RectTransform>();
+        if (parentRT != null)
+        {
+            parentRT.anchorMin = new Vector2(0.5f, 0.5f);
+            parentRT.anchorMax = new Vector2(0.5f, 0.5f);
+            parentRT.pivot = new Vector2(0.5f, 0.5f);
+            parentRT.anchoredPosition = new Vector2(0f, parentRT.anchoredPosition.y);
+        }
+
+        // 2. Lấy danh sách các thanh còn đang hoạt động
+        List<RectTransform> activeBars = new List<RectTransform>();
+        foreach (Transform child in targetBarsRoot)
+        {
+            if (child.gameObject.activeSelf)
+            {
+                RectTransform rt = child.GetComponent<RectTransform>();
+                if (rt != null) activeBars.Add(rt);
+            }
+        }
+
+        int count = activeBars.Count;
+        if (count == 0) yield break; 
+
+        // 3. Ép toàn bộ anchors các con về trung tâm để quy đồng gốc tọa độ (0,0) ở giữa màn hình
+        foreach (RectTransform bar in activeBars)
+        {
+            if (bar != null)
+            {
+                bar.anchorMin = new Vector2(0.5f, 0.5f);
+                bar.anchorMax = new Vector2(0.5f, 0.5f);
+                bar.pivot = new Vector2(0.5f, 0.5f);
+            }
+        }
+
+        Vector2[] startPositions = new Vector2[count];
+        Vector2[] targetPositions = new Vector2[count];
+
+        float barWidth = activeBars[0].rect.width;
+        if (barWidth <= 0) barWidth = 140f; 
+
+        // 4. Tính toán lại tổng chiều rộng mới của các thanh còn lại để chia đôi căn giữa
+        float totalLayoutWidth = (count * barWidth) + ((count - 1) * targetBarSpacing);
+        float startX = -totalLayoutWidth / 2f + barWidth / 2f;
+
+        for (int i = 0; i < count; i++)
+        {
+            startPositions[i] = activeBars[i].anchoredPosition;
+            float targetX = startX + i * (barWidth + targetBarSpacing);
+            // Khóa chặt Y = 0 để bảo đảm thẳng hàng tắp, không bị lệch cao độ
+            targetPositions[i] = new Vector2(targetX, 0f); 
+        }
+
+        // 5. Vòng lặp Lerp tịnh tiến chậm rãi, mượt mà
+        float elapsed = 0f;
+        while (elapsed < rearrangeDuration)
+        {
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / rearrangeDuration);
+            float tEased = Mathf.SmoothStep(0f, 1f, progress); 
+
+            for (int i = 0; i < count; i++)
+            {
+                if (activeBars[i] != null)
+                {
+                    activeBars[i].anchoredPosition = Vector2.Lerp(startPositions[i], targetPositions[i], tEased);
+                }
+            }
+            yield return null;
+        }
+
+        // Chốt số cuối chặn sai lệch dấu phẩy
+        for (int i = 0; i < count; i++)
+        {
+            if (activeBars[i] != null) activeBars[i].anchoredPosition = targetPositions[i];
+        }
+    }
+
+    // HOẠT ẢNH BỔ TRỢ: Dấu tích nở nhẹ, đứng yên biệt lập và mờ dần biến mất
+    private IEnumerator AnimateCheckmarkStaticRoutine(RectTransform rect, CanvasGroup group)
+    {
+        float fadeInDuration = 0.2f;
+        float stayDuration = 0.45f;
+        float fadeOutDuration = 0.2f;
+        float elapsed = 0f;
+
+        if (group == null || rect == null) yield break;
+
+        group.alpha = 0f;
+        rect.localScale = Vector3.zero;
+
+        while (elapsed < fadeInDuration)
+        {
+            if (rect == null) yield break;
+            elapsed += Time.deltaTime;
+            float progress = elapsed / fadeInDuration;
+            group.alpha = progress;
+            rect.localScale = Vector3.Lerp(Vector3.zero, Vector3.one, progress);
+            yield return null;
+        }
+        group.alpha = 1f;
+        rect.localScale = Vector3.one;
+
+        yield return new WaitForSeconds(stayDuration);
+
+        elapsed = 0f;
+        while (elapsed < fadeOutDuration)
+        {
+            if (rect == null) yield break;
+            elapsed += Time.deltaTime;
+            float progress = elapsed / fadeOutDuration;
+            group.alpha = 1f - progress;
+            rect.localScale = Vector3.Lerp(Vector3.one, Vector3.zero, progress);
+            yield return null;
+        }
+
+        if (rect != null) Destroy(rect.gameObject);
     }
 
     private void CheckWin()

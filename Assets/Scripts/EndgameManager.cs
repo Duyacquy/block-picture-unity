@@ -52,7 +52,7 @@ public class EndgameManager : MonoBehaviour
 
     private IEnumerator EndgameRoutine()
     {
-        yield return new WaitForSeconds(1.5f);
+        yield return new WaitForSeconds(3f);
 
         if (winPanel != null) winPanel.SetActive(true);
         if (AudioManager.Instance != null) AudioManager.Instance.StopBGM();
