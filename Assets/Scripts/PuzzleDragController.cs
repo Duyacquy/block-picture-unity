@@ -116,6 +116,8 @@ public class PuzzleDragController : MonoBehaviour
 
     private void BeginDrag(Vector2 screenPos)
     {
+        if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.blockUp);
+
         Ray ray = mainCamera.ScreenPointToRay(screenPos);
         RaycastHit hit;
 
@@ -227,36 +229,37 @@ public class PuzzleDragController : MonoBehaviour
             draggingBlock.ToggleOutline(false);
         }
 
-        // Khóa mục tiêu hạ cánh chuẩn xác tại ô Grid an toàn cuối cùng mà hệ thống tìm đường chấp thuận
+        // Khóa mục tiêu hạ cánh chuẩn xác tại ô Grid an toàn cuối cùng
         int finalCol = draggingCurrentCol;
         int finalRow = draggingCurrentRow;
 
         if (CanPlaceBlock(draggingBlock, finalCol, finalRow))
         {
-            draggingBlock.SetGridPosition(finalCol, finalRow); //
+            draggingBlock.SetGridPosition(finalCol, finalRow);
         }
         else
         {
-            finalCol = draggingStartCol; //
-            finalRow = draggingStartRow; //
-            draggingBlock.SetGridPosition(finalCol, finalRow); //
+            finalCol = draggingStartCol;
+            finalRow = draggingStartRow;
+            draggingBlock.SetGridPosition(finalCol, finalRow);
         }
 
-        AddBlockToOccupied(draggingBlock); //
-        Vector3 snapWorldPos = gridManager.GridToWorld(finalRow, finalCol); //
+        AddBlockToOccupied(draggingBlock);
+        Vector3 snapWorldPos = gridManager.GridToWorld(finalRow, finalCol);
 
-        StartTween( //
-            draggingBlock.transform.position, //
-            snapWorldPos, //
-            draggingBlock.transform.localScale, //
-            originalScale, //
-            snapDuration, //
-            () => { draggingBlock = null; } //
-        );
-
-        if (CheckGroupAssembled(draggingBlock.colorGroup)) //
+        // ====================================================================
+        // SỬA LỖI CHÍ MẠNG: KIỂM TRA KHỚP NHÓM TRƯỚC KHI CHẠY TWEEN HÚT LƯỚI
+        // ====================================================================
+        if (CheckGroupAssembled(draggingBlock.colorGroup))
         {
-            Debug.Log($"Nhóm màu {draggingBlock.colorGroup} đã xếp khớp tương đối!");
+            if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.blockMatch);
+
+            // Ép khối về đúng vị trí đích ngay lập tức, không chạy Tween của chuột nữa
+            draggingBlock.transform.position = snapWorldPos;
+            draggingBlock.transform.localScale = originalScale;
+            
+            // GIẢI PHÓNG LOCK: Trả trạng thái Tween về false ngay để click được khối khác!
+            isTweening = false; 
 
             DraggableBlock[] allBlocks = blocksRoot.GetComponentsInChildren<DraggableBlock>();
             List<DraggableBlock> groupBlocks = new List<DraggableBlock>();
@@ -266,14 +269,28 @@ public class PuzzleDragController : MonoBehaviour
                 {
                     groupBlocks.Add(b);
 
-                    // Tắt toàn bộ Collider của nhóm này ngay lập tức để tránh người chơi click nhầm
+                    // Tắt toàn bộ Collider của nhóm này ngay lập tức để tránh người chơi click nhầm lúc đang nổ
                     b.enabled = false;
                     foreach (var col in b.GetComponentsInChildren<Collider>()) col.enabled = false;
                 }
             }
 
-            // 2. Kích hoạt chuỗi hoạt ảnh nổ khối - bay tranh
+            // Kích hoạt chuỗi hoạt ảnh nổ khối - bay tranh
             StartCoroutine(PlayGroupShatterSequence(groupBlocks, draggingBlock.colorGroup));
+            draggingBlock = null; 
+        }
+        else
+        {
+            if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.blockDown);
+
+            StartTween(
+                draggingBlock.transform.position,
+                snapWorldPos,
+                draggingBlock.transform.localScale,
+                originalScale,
+                snapDuration,
+                () => { draggingBlock = null; }
+            );
         }
     }
 
@@ -625,6 +642,8 @@ public class PuzzleDragController : MonoBehaviour
             if (visuals != null) groupColor = visuals.blockColor;
         }
 
+        if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.blockBreak);
+
         // Sinh lượng lớn mảnh vỡ tập trung tại tâm (Số mảnh = 15 mảnh * số lượng block)
         int totalFragments = 15 * blocks.Count;
         SpawnShatterFragmentsAtCenter(groupCenterWorld, groupColor, totalFragments);
@@ -639,10 +658,11 @@ public class PuzzleDragController : MonoBehaviour
         // Cập nhật lại từ điển ô trống của bàn cờ
         RebuildOccupied();
 
+        CheckWin();
+
         // --- GIAI ĐOẠN 3: ĐUÔI SAO & TWEEN ẢNH UI VỀ ĐÍCH ---
         if (flyingImageObj != null && targetUiSlot != null)
         {
-            // Gắn hạt đuôi sao bay bám theo bức ảnh UI
             GameObject trailFx = null;
             if (starTrailParticlePrefab != null)
             {
@@ -676,8 +696,12 @@ public class PuzzleDragController : MonoBehaviour
             if (trailFx != null) Destroy(trailFx);
             Destroy(flyingImageObj);
 
-            // Bạn có thể kích hoạt hoạt ảnh Punch Scale tại thẻ bài UI đích ở đây
-            StartCoroutine(PunchScaleUI(targetUiSlot));
+            if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.pictureCollect);
+
+            if (targetUiSlot.parent != null && targetUiSlot.parent != targetBarsRoot)
+            {
+                StartCoroutine(PunchScaleUI(targetUiSlot.parent));
+            }
         }
     }
 
@@ -752,4 +776,36 @@ public class PuzzleDragController : MonoBehaviour
         uiTarget.localScale = originScale;
     }
 
+    private void CheckWin()
+    {
+        if (blocksRoot == null) return;
+
+        bool hasActiveBlocks = false;
+        
+        DraggableBlock[] allBlocks = blocksRoot.GetComponentsInChildren<DraggableBlock>(true);
+
+        foreach (var block in allBlocks)
+        {
+            if (block != null && block.enabled && block.gameObject.activeSelf)
+            {
+                hasActiveBlocks = true;
+                break; 
+            }
+        }
+
+        if (!hasActiveBlocks)
+        {
+            GameHUDManager hudManager = FindAnyObjectByType<GameHUDManager>();
+            if (hudManager != null)
+            {
+                hudManager.StopTimer();
+            }
+
+            EndgameManager endgameUI = FindAnyObjectByType<EndgameManager>();
+            if (endgameUI != null)
+            {
+                endgameUI.ShowEndgame();
+            }
+        }
+    }
 }

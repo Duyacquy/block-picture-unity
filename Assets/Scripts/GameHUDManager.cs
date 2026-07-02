@@ -64,8 +64,6 @@ public class GameHUDManager : MonoBehaviour
         {
             timeRemaining -= Time.deltaTime;
             
-            // SỬA TẠI ĐÂY: Dùng CeilToInt làm tròn lên. Khi thời gian là 14.9s -> Chữ hiện 15s.
-            // Số hiển thị trên màn hình và logic giây sẽ khớp nhau hoàn toàn 100%
             int currentWholeSeconds = Mathf.CeilToInt(timeRemaining);
             
             // PHÁT HIỆN SỰ KIỆN: Số giây chính thức giảm xuống (1 khung hình duy nhất mỗi giây)
@@ -79,7 +77,8 @@ public class GameHUDManager : MonoBehaviour
                 {
                     timerText.color = warningColor;
 
-                    // KÍCH HOẠT HIỆU ỨNG: Phóng to thu nhỏ ĐÚNG 1 LẦN khi nhảy số
+                    if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.tickTock);
+
                     if (pulseCoroutine != null) StopCoroutine(pulseCoroutine);
                     pulseCoroutine = StartCoroutine(PulseTextOnce());
                 }
@@ -148,12 +147,19 @@ public class GameHUDManager : MonoBehaviour
 
     private void OnTimeOut()
     {
-        Debug.Log("Hết giờ đếm ngược!");
+        EndgameManager endgameUI = FindAnyObjectByType<EndgameManager>();
+        if (endgameUI != null)
+        {
+            endgameUI.ShowLose();
+        }
     }
 
     private void OnReplayClicked()
     {
         if (isReplaying) return; 
+
+        if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.clickBtn);
+
         StartCoroutine(PlayButtonJuiceAndReload());
     }
 
@@ -179,5 +185,10 @@ public class GameHUDManager : MonoBehaviour
 
         if (replayButton != null) replayButton.transform.localScale = originalButtonScale;
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    public void StopTimer()
+    {
+        this.enabled = false;
     }
 }
