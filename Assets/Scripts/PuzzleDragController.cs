@@ -24,6 +24,23 @@ public class PuzzleDragController : MonoBehaviour
     [Tooltip("Thời gian dịch chuyển dồn hàng chậm rãi, mượt mà (giây)")]
     public float rearrangeDuration = 0.6f;
 
+    [Header("Bubble VFX (Pure Code C#)")]
+    [Tooltip("Kéo trực tiếp file ảnh Sprite HÌNH TRÒN TRẮNG ĐẶC (Filled Circle) vào đây")]
+    public Sprite genericCircleSprite;
+    
+    [Tooltip("Số lượng bong bóng sinh ra khi nổ khối hoàn thành")]
+    public int shatterBubbleCount = 15;
+
+    // Bảng màu sắc ngẫu nhiên cho bong bóng chuẩn mẫu Cocos
+    private readonly Color[] bubbleColors = new Color[]
+    {
+        new Color(0.44f, 0.86f, 1.00f), // Xanh dương ngọc
+        new Color(1.00f, 0.53f, 0.74f), // Hồng neon
+        new Color(1.00f, 0.87f, 0.44f), // Vàng nắng
+        new Color(0.64f, 1.00f, 0.53f), // Xanh lá mầm
+        new Color(0.74f, 0.57f, 1.00f)  // Tím pastel
+    };
+
     private Dictionary<string, DraggableBlock> occupiedCells = new Dictionary<string, DraggableBlock>();
 
     private DraggableBlock draggingBlock = null;
@@ -766,8 +783,20 @@ public class PuzzleDragController : MonoBehaviour
 
         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(AudioManager.Instance.blockBreak);
 
-        int totalFragments = 10 * blocks.Count;
-        SpawnShatterFragmentsAtCenter(groupCenterWorld, groupColor, totalFragments);
+        int fragmentsPerBlock = 12; 
+        foreach (var block in blocks)
+        {
+            if (block != null)
+            {
+                SpawnShatterFragmentsForBlock(block.transform.position, groupColor, fragmentsPerBlock);
+            }
+        }
+
+        Vector3 blockScreenPos = mainCamera.WorldToScreenPoint(groupCenterWorld);
+        for (int i = 0; i < shatterBubbleCount; i++)
+        {
+            SpawnUiBubblePureCode(blockScreenPos, true);
+        }
 
         foreach (var block in blocks)
         {
@@ -826,57 +855,122 @@ public class PuzzleDragController : MonoBehaviour
         }
     }
 
-    private void SpawnShatterFragmentsAtCenter(Vector3 centerWorldPos, Color blockColor, int fragmentCount)
+    private void SpawnShatterFragmentsForBlock(Vector3 blockWorldPos, Color blockColor, int fragmentCount)
     {
         for (int i = 0; i < fragmentCount; i++)
         {
             if (shatterFragmentPrefab == null) break;
 
-            // Sinh ngẫu nhiên rải rác trong phạm vi hẹp của khối
-            float spawnRangeX = Random.Range(-0.35f, 0.35f);
-            float spawnRangeZ = Random.Range(-0.5f, 0.5f);
-            Vector3 spawnPos = centerWorldPos + new Vector3(spawnRangeX, 0.05f, spawnRangeZ);
+            // 1. Sinh mảnh vỡ rải rác nhẹ quanh tâm của chính block đó (Chống trùng khít đỉnh)
+            float spawnRangeX = Random.Range(-0.25f, 0.25f);
+            float spawnRangeZ = Random.Range(-0.25f, 0.25f);
+            Vector3 spawnPos = blockWorldPos + new Vector3(spawnRangeX, 0.2f, spawnRangeZ);
 
             Quaternion randomRot = Quaternion.Euler(Random.Range(0, 360), Random.Range(0, 360), Random.Range(0, 360));
             GameObject frag = Instantiate(shatterFragmentPrefab, spawnPos, randomRot);
 
-            // Giữ nguyên kích cỡ to ghồ ghề bạn đã ưng ý
-            float scaleX = Random.Range(0.18f, 0.32f);
-            float scaleY = Random.Range(0.32f, 0.64f);
-            float scaleZ = Random.Range(0.18f, 0.32f);
-            frag.transform.localScale = new Vector3(scaleX, scaleY, scaleZ);
+            // 2. Thiết lập kích cỡ ngẫu nhiên theo mốc cao gồ ghề của bạn
+            float scaleX = Random.Range(0.20f, 0.30f);  
+            float scaleY = Random.Range(0.40f, 0.60f); 
+            float scaleZ = Random.Range(0.20f, 0.30f);  
+            Vector3 initialScale = new Vector3(scaleX, scaleY, scaleZ);
+            frag.transform.localScale = initialScale;
 
-            // Nhuộm màu khối gốc
+            // 3. Nhuộm màu khối tương ứng
             MeshRenderer fragRenderer = frag.GetComponent<MeshRenderer>();
             if (fragRenderer != null) fragRenderer.material.color = blockColor;
 
-            // Tắt collider chống nổ vật lý loạn xạ
+            // 4. KHÓA VẬT LÝ: Tắt collider và hủy thành phần Rigidbody/ConstantForce nếu có sẵn trên Prefab
+            // Việc này giúp chuyển toàn bộ quyền kiểm soát động lực học sang Coroutine C# thuần túy mượt mà
             Collider fragCollider = frag.GetComponent<Collider>();
             if (fragCollider != null) fragCollider.enabled = false;
 
             Rigidbody rb = frag.GetComponent<Rigidbody>();
-            if (rb == null) rb = frag.AddComponent<Rigidbody>();
-
-            rb.useGravity = false; // BẮT BUỘC TẮT: Để triệt tiêu lực kéo xuống theo trục Y mặc định
-
-            // Thêm cấu phần lực liên tục để giả lập trọng lực theo trục Z
-            ConstantForce cf = frag.GetComponent<ConstantForce>();
-            if (cf == null) cf = frag.AddComponent<ConstantForce>();
+            if (rb != null) Destroy(rb);
             
-            cf.force = new Vector3(0f, 0f, -12f); 
+            ConstantForce cf = frag.GetComponent<ConstantForce>();
+            if (cf != null) Destroy(cf);
 
-            rb.linearVelocity = new Vector3(
-                Random.Range(-2.5f, 2.5f), // Bung theo chiều ngang X
-                Random.Range(-2.5f, 2.5f), // Bung theo chiều đứng Y (nếu bàn cờ dựng đứng)
-                Random.Range(1.5f, 3.0f)   // Bắn mạnh về hướng +Z một nhịp trước khi bị lực ép lùi về -Z
-            );
-
-            // Giảm tốc độ tự xoay góc xuống mức vừa phải
-            rb.angularVelocity = new Vector3(Random.Range(-3f, 3f), Random.Range(-3f, 3f), Random.Range(-3f, 3f));
-
-            // Tự động xóa sau khi rơi khuất
-            Destroy(frag, 1.2f);
+            // 5. KÍCH HOẠT HOẠT ẢNH QUỸ ĐẠO MẪU COCOS
+            StartCoroutine(AnimateShatterFragmentProgrammaticRoutine(frag, spawnPos, initialScale, mainCamera));
         }
+    }
+
+    // 🔥 THUẬT TOÁN ĐỘNG LỰC HỌC 2 GIAI ĐOẠN KHÔNG DÙNG RIGIDBODY
+    private IEnumerator AnimateShatterFragmentProgrammaticRoutine(GameObject frag, Vector3 startPos, Vector3 initialScale, Camera cam)
+    {
+        if (frag == null || cam == null) yield break;
+
+        // Cấu hình thời gian chuẩn chỉnh theo bản mẫu Cocos
+        float burstDuration = Random.Range(0.12f, 0.18f); // Thời gian bùng nổ văng ra
+        float fallDuration = Random.Range(0.45f, 0.65f);  // Thời gian rơi rụng tự do
+        
+        // Đo khoảng cách ban đầu tới ống kính để phục vụ hệ thống giữ kích thước màn hình của bạn
+        float initialDistance = Vector3.Distance(startPos, cam.transform.position);
+        if (initialDistance <= 0.001f) initialDistance = 1f;
+
+        // Thuật toán tính góc tủa tròn phẳng XZ kết hợp lực nảy ngược lên trời trục Y
+        float angle = Random.Range(0f, Mathf.PI * 2f);
+        float spread = Random.Range(0.5f, 1.3f); // Độ lan rộng sang hai bên
+        float rise = Random.Range(0.4f, 1.0f);   // Độ nhấc vọt lên không trung chống chìm sàn
+
+        Vector3 burstTargetPos = startPos + new Vector3(Mathf.Cos(angle) * spread, rise, Mathf.Sin(angle) * spread);
+        
+        // Điểm hạ cánh cuối đời: Rơi tuột xuống hố sâu (-Y) và trôi tịnh tiến cuộn về hướng lòng camera (-Z)
+        Vector3 finalFallPos = burstTargetPos + new Vector3(Random.Range(-0.3f, 0.3f), -5.5f, -3.5f);
+
+        // Trục tự xoay lộn vòng độc lập ngẫu nhiên
+        Vector3 randomRotationAxis = new Vector3(Random.Range(-1f, 1f), Random.Range(-1f, 1f), Random.Range(-1f, 1f)).normalized;
+        float rotationSpeed = Random.Range(320f, 650f);
+
+        float elapsed = 0f;
+
+        // === GIAI ĐOẠN 1: BÙNG NỔ TỦA RA (Ease Out) ===
+        while (elapsed < burstDuration)
+        {
+            if (frag == null) yield break;
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / burstDuration);
+            
+            // Nội suy Sin tạo gia tốc nổ mạnh đầu đời và chậm lại khi đạt đỉnh văng
+            float tEased = Mathf.Sin(progress * Mathf.PI * 0.5f); 
+
+            frag.transform.position = Vector3.Lerp(startPos, burstTargetPos, tEased);
+            frag.transform.Rotate(randomRotationAxis, rotationSpeed * Time.deltaTime);
+
+            // Kế thừa thuật toán của bạn: Cập nhật tỷ lệ scale giữ nguyên độ to hiển thị ngoài võng mạc
+            float currentDistance = Vector3.Distance(frag.transform.position, cam.transform.position);
+            frag.transform.localScale = initialScale * (currentDistance / initialDistance);
+
+            yield return null;
+        }
+
+        // === GIAI ĐOẠN 2: CÁC-CÁT RƠI RỤNG & THU NHỎ DẦN (Ease In) ===
+        elapsed = 0f;
+        while (elapsed < fallDuration)
+        {
+            if (frag == null) yield break;
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / fallDuration);
+            
+            // Lũy thừa bậc 2 tạo hiệu ứng gia tốc trọng lực rơi nhanh dần đều cực mượt
+            float tEased = progress * progress; 
+
+            frag.transform.position = Vector3.Lerp(burstTargetPos, finalFallPos, tEased);
+            frag.transform.Rotate(randomRotationAxis, rotationSpeed * Time.deltaTime);
+
+            // Hòa trộn toán học: Vừa giữ kích thước theo khoảng cách camera, vừa co rụt về mốc 0 mịn màng ở cuối đời
+            float currentDistance = Vector3.Distance(frag.transform.position, cam.transform.position);
+            Vector3 screenAdjustedScale = initialScale * (currentDistance / initialDistance);
+            
+            // Thu nhỏ dần đều mịn màng theo tiến trình rơi
+            frag.transform.localScale = Vector3.Lerp(screenAdjustedScale, Vector3.zero, progress);
+
+            yield return null;
+        }
+
+        // Kết thúc chu kỳ sống hoàn hảo: Giải phóng đối tượng khỏi bộ nhớ RAM
+        if (frag != null) Destroy(frag);
     }
 
     // ====================================================================
@@ -1179,5 +1273,117 @@ public class PuzzleDragController : MonoBehaviour
                 endgameUI.ShowEndgame();
             }
         }
+    }
+
+    /// <summary>
+    /// Sinh một bong bóng UI thuần code bằng cách xếp chồng các lớp Sprite hình tròn trắng
+    /// </summary>
+    public void SpawnUiBubblePureCode(Vector2 screenPos, bool isBurst)
+    {
+        if (genericCircleSprite == null || uiCanvasRoot == null) return;
+
+        // 1. CHỌN KÍCH THƯỚC & THỜI GIAN THEO ĐÚNG MẪU COCOS
+        float baseSize = isBurst ? Random.Range(35f, 55f) : Random.Range(20f, 35f);
+        float duration = isBurst ? Random.Range(0.65f, 0.95f) : Random.Range(0.35f, 0.55f);
+        Color randomColor = bubbleColors[Random.Range(0, bubbleColors.Length)];
+
+        // 2. KHỞI TẠO NODE CHA TỔNG CHỨA CANVAS GROUP ĐỂ PHỤC VỤ MỜ DẦN ALPHA
+        GameObject bubbleObj = new GameObject("UI_ProgBubble", typeof(RectTransform), typeof(CanvasGroup));
+        bubbleObj.transform.SetParent(uiCanvasRoot, false);
+        
+        RectTransform mainRect = bubbleObj.GetComponent<RectTransform>();
+        mainRect.position = screenPos;
+        mainRect.sizeDelta = new Vector2(baseSize, baseSize);
+
+        CanvasGroup group = bubbleObj.GetComponent<CanvasGroup>();
+
+        // LỚP 1: VÒNG VIỀN BONG BÓNG (Stroke Ring) - Kích thước 90%
+        GameObject borderObj = new GameObject("BorderRing", typeof(RectTransform), typeof(Image));
+        borderObj.transform.SetParent(bubbleObj.transform, false);
+        RectTransform borderRect = borderObj.GetComponent<RectTransform>();
+        borderRect.sizeDelta = new Vector2(baseSize * 0.9f, baseSize * 0.9f);
+        Image borderImg = borderObj.GetComponent<Image>();
+        borderImg.sprite = genericCircleSprite;
+        // Alpha của viền cao hơn để nhìn rõ nét (Chuẩn Cocos: 135/255)
+        borderImg.color = new Color(randomColor.r, randomColor.g, randomColor.b, isBurst ? 0.85f : 0.65f);
+
+        // LỚP 2: LÒNG TRONG SUỐT (Inner Fill Overlay) - Kích thước 81% đè lên lớp 1 tạo thành vòng nhẫn
+        GameObject fillObj = new GameObject("InnerFill", typeof(RectTransform), typeof(Image));
+        fillObj.transform.SetParent(bubbleObj.transform, false);
+        RectTransform fillRect = fillObj.GetComponent<RectTransform>();
+        fillRect.sizeDelta = new Vector2(baseSize * 0.81f, baseSize * 0.81f);
+        Image fillImg = fillObj.GetComponent<Image>();
+        fillImg.sprite = genericCircleSprite;
+        // Alpha ruột cực kỳ thấp để tạo hiệu ứng bóng kính trong suốt (Chuẩn Cocos: 24/255)
+        fillImg.color = new Color(randomColor.r, randomColor.g, randomColor.b, isBurst ? 0.25f : 0.15f);
+
+        // LỚP 3: ĐỐM PHẢN QUANG (Specular Shine) - Chấm trắng nhỏ nằm lệch góc tạo khối 3D Juicy
+        GameObject shineObj = new GameObject("SpecularShine", typeof(RectTransform), typeof(Image));
+        shineObj.transform.SetParent(bubbleObj.transform, false);
+        RectTransform shineRect = shineObj.GetComponent<RectTransform>();
+        shineRect.sizeDelta = new Vector2(baseSize * 0.17f, baseSize * 0.17f);
+        // Đẩy lệch tâm lên góc trên bên phải (Chuẩn toán học Cocos)
+        shineRect.anchoredPosition = new Vector2(baseSize * 0.15f, baseSize * 0.15f);
+        Image shineImg = shineObj.GetComponent<Image>();
+        shineImg.sprite = genericCircleSprite;
+        shineImg.color = new Color(1f, 1f, 1f, isBurst ? 0.62f : 0.43f);
+
+        // 3. TÍNH TOÁN QUỸ ĐẠO BAY PHÂN TÁN KẾT HỢP LỰC ĐẨY LÊN (FLOAT UP)
+        float angle = Random.Range(0f, Mathf.PI * 2f);
+        float distance = isBurst ? Random.Range(130f, 200f) : Random.Range(60f, 120f);
+        
+        // ĐẶC TRƯNG BONG BÓNG: Ép lực trục Y luôn dương để bong bóng tự động bốc bay lên trời!
+        float floatY = isBurst ? Random.Range(150f, 350f) : Random.Range(80f, 150f);
+
+        Vector3 endPosition = new Vector3(
+            mainRect.position.x + Mathf.Cos(angle) * distance,
+            mainRect.position.y + Mathf.Sin(angle) * distance + floatY,
+            0f
+        );
+
+        float startScale = Random.Range(0.45f, 0.7f);
+        float endScale = isBurst ? Random.Range(1.1f, 1.4f) : Random.Range(0.6f, 0.85f);
+
+        // Kích hoạt luồng hoạt ảnh xử lý động lực học
+        StartCoroutine(AnimateUiBubbleRoutine(bubbleObj, mainRect, group, endPosition, startScale, endScale, duration));
+    }
+
+    private IEnumerator AnimateUiBubbleRoutine(GameObject bubble, RectTransform rect, CanvasGroup group, Vector3 endPos, float startScale, float endScale, float duration)
+    {
+        float elapsed = 0f;
+        Vector3 initialScale = Vector3.one * startScale;
+        Vector3 targetScale = Vector3.one * endScale;
+        Vector3 startPos = rect.position;
+
+        // Tốc độ lộn vòng tự do quanh tâm phẳng của bong bóng
+        float rotationSpeed = Random.Range(-120f, 120f);
+
+        while (elapsed < duration)
+        {
+            if (bubble == null || rect == null) yield break;
+
+            elapsed += Time.deltaTime;
+            float progress = Mathf.Clamp01(elapsed / duration);
+
+            // A. TỊNH TIẾN BIÊN ĐỘ: Di chuyển theo đồ thị mượt Ease-Out
+            float tPos = Mathf.Sin(progress * Mathf.PI * 0.5f);
+            rect.position = Vector3.Lerp(startPos, endPos, tPos);
+
+            // B. CO GIÃN SCALE: Phóng to nhẹ dần ra khi bay lên tượng trưng áp suất không khí
+            rect.localScale = Vector3.Lerp(initialScale, targetScale, tPos);
+
+            // C. XOAY: Lộn nhẹ góc Z
+            rect.Rotate(Vector3.forward, rotationSpeed * Time.deltaTime);
+
+            // D. TÀNG HÌNH ĐỘT NGỘT: Càng về cuối đời bong bóng càng mờ và vỡ "bốp" biến mất nhanh
+            if (group != null)
+            {
+                group.alpha = Mathf.Clamp01((1f - progress) * 2f);
+            }
+
+            yield return null;
+        }
+
+        if (bubble != null) Destroy(bubble);
     }
 }
