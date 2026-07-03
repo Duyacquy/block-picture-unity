@@ -24,7 +24,13 @@ public class DraggableBlock : MonoBehaviour
 
     [Header("Runtime Outline Reference (Pure Code)")]
     private GameObject outlineContainer = null;
-    private float outlineScaleMultiplier = 1.08f;
+    public Material outlineMaterial;
+
+    [Tooltip("Chỉnh về 1.0f để khối viền bằng khít khối gốc, không phình sang ngang gây lấn block khác")]
+    public float outlineScaleMultiplier = 1.0f; 
+    
+    [Tooltip("Độ cao nhấc hẳn viền lên trên đầu khối (Ví dụ: 0.1 đến 0.3 tùy độ cao khối của bạn)")]
+    private float outlineYOffset = 0.3f;
 
     private void Start()
     {
@@ -89,44 +95,36 @@ public class DraggableBlock : MonoBehaviour
         // Thu thập tất cả MeshFilter của khối (Đế nhựa + Mặt tranh) để nhân bản chính xác phom dáng khối
         MeshFilter[] childMeshFilters = GetComponentsInChildren<MeshFilter>();
 
-        // 🌟 MẸO PURE CODE TRÊN UNITY: Sử dụng shader "Sprites/Default" giúp tạo ra một bề mặt màu phẳng,
-        // Unlit (không bị ảnh hưởng bởi ánh sáng môi trường), hoạt động hoàn hảo trên CẢ Built-in lẫn URP/HDRP pipeline.
-        Material outlineMat = new Material(Shader.Find("Sprites/Default"));
-        outlineMat.color = Color.white; // Thiết lập viền màu trắng tinh khiết
+        if (outlineMaterial == null) {
+            Debug.LogError("Chưa kéo file Mat_Outline vào DraggableBlock của ô này!");
+            return;
+        }
 
         foreach (MeshFilter filter in childMeshFilters)
         {
-            // Bảo hiểm không tự nhân bản chính vùng chứa viền
-            if (filter.gameObject == outlineContainer || filter.transform.IsChildOf(outlineContainer.transform))
+            if (filter.gameObject == outlineContainer || filter.transform.IsChildOf(outlineContainer.transform)) 
                 continue;
 
-            // 3. NHÂN BẢN MESH HÌNH HỌC PHẲNG
             GameObject outlineMeshObj = new GameObject("__DragOutlineMesh");
             outlineMeshObj.transform.SetParent(outlineContainer.transform, false);
-
-            // Đồng bộ tọa độ và góc xoay cục bộ tương ứng với từng mảnh mesh con của khối gốc
+            
             outlineMeshObj.transform.localPosition = filter.transform.localPosition;
             outlineMeshObj.transform.localRotation = filter.transform.localRotation;
-
-            // 🔥 THUẬT TOÁN COCOS: Phóng to kích thước rìa khối lên 1.08 lần để tạo dải viền đều bao quanh
+            
+            // 1. ÁP DỤNG SCALE MỚI: Bằng khít mốc gốc (1.0f) không phình ngang
             outlineMeshObj.transform.localScale = Vector3.Scale(
-                filter.transform.localScale,
+                filter.transform.localScale, 
                 new Vector3(outlineScaleMultiplier, outlineScaleMultiplier, outlineScaleMultiplier)
             );
 
-            // Đẩy nhẹ vị trí Y cục bộ xuống một chút (-0.012f) để phần viền trắng nằm lót phía dưới đáy
-            // tạo cảm giác viền bám khít lấy chân đế nhựa của khối Jelly 3D.
-            outlineMeshObj.transform.localPosition += new Vector3(0f, -0.012f, 0f);
+            outlineMeshObj.transform.localPosition += new Vector3(0f, outlineYOffset, 0f);
 
-            // Gán dữ liệu lưới hình học gốc sang mesh viền
             MeshFilter mf = outlineMeshObj.AddComponent<MeshFilter>();
             mf.sharedMesh = filter.sharedMesh;
 
-            // Thêm Renderer và gán vật liệu Unlit trắng rực rỡ vừa tạo
             MeshRenderer mr = outlineMeshObj.AddComponent<MeshRenderer>();
-            mr.sharedMaterial = outlineMat;
-
-            // TẮT ĐỔ BÓNG: Viền Highlight không được phép nhận hay đổ bóng để giữ độ sáng phẳng tuyệt đối
+            mr.sharedMaterial = outlineMaterial;
+            
             mr.receiveShadows = false;
             mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
         }

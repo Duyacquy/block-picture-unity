@@ -16948,6 +16948,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: 1, y: 0}
   - {x: 0, y: 1}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!4 &1289409476465486107
 Transform:
   m_ObjectHideFlags: 0
@@ -17485,6 +17487,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: 1, y: 0}
   - {x: 0, y: 1}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!1 &3080352263923010527
 GameObject:
   m_ObjectHideFlags: 0
@@ -17579,6 +17583,8 @@ MonoBehaviour:
   shape:
   - {x: 0, y: 0}
   - {x: 1, y: 0}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!33 &3469287837724637568
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -17820,6 +17826,8 @@ MonoBehaviour:
   shape:
   - {x: 0, y: 0}
   - {x: 1, y: 0}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!4 &4167549133651329471
 Transform:
   m_ObjectHideFlags: 0
@@ -17874,6 +17882,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: -1, y: 0}
   - {x: 0, y: 1}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!33 &4489836839303434505
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -18111,6 +18121,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: -1, y: 0}
   - {x: 0, y: -1}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!1 &5278647276196934726
 GameObject:
   m_ObjectHideFlags: 0
@@ -18166,6 +18178,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: -1, y: 0}
   - {x: 0, y: -1}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!33 &5290405858920320839
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -18375,6 +18389,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: 1, y: 0}
   - {x: -1, y: 0}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!4 &6790190979940232786
 Transform:
   m_ObjectHideFlags: 0
@@ -18657,6 +18673,8 @@ MonoBehaviour:
   - {x: 0, y: 0}
   - {x: 1, y: 0}
   - {x: 0, y: -1}
+  outlineMaterial: {fileID: 2100000, guid: fef4e47d29818df428299bbdb28a6172, type: 2}
+  outlineScaleMultiplier: 1.08
 --- !u!1 &7774617042071605728
 GameObject:
   m_ObjectHideFlags: 0
